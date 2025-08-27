@@ -38,7 +38,7 @@ WallpaperManager/
 # Data: 27/08/2025
 # -----------------------------------------------------------
 
-REDE=\\EEBGLL-LAB00\rede\Imagen
+REDE=\\localdarede
 ATIVO=ON
 WALL=ativo.png
 EXECUTAVEL=WallpapperChanger.exe
