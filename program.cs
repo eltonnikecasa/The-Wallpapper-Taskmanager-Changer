@@ -1,23 +1,3 @@
-/*
- * ---------------------------------------------------------
- * Software:   Wallpaper Manager
- * Criador:    Elton Nike Casa
- * Data:       26/08/2025
- *
- * Descrição:
- * Este software verifica um arquivo de configuração (config.cfg)
- * e, caso o parâmetro ATIVO esteja definido como ON:
- *   - Verifica se há versão mais nova do executável na pasta de rede
- *   - Copia a imagem de wallpaper se for mais nova que a local
- *   - Define automaticamente a imagem como papel de parede do Windows
- *
- * Observações:
- * - Executa em segundo plano, sem exibir janelas
- * - Mantém backup automático do executável ao atualizar
- * - Pode ser executado como Console Application sem mostrar a tela
- * ---------------------------------------------------------
- */
-
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -37,16 +17,116 @@ class Program
     [STAThread]
     static void Main()
     {
-        // Esconde a janela do console
+        // Oculta o console imediatamente
         var handle = GetConsoleWindow();
         ShowWindow(handle, SW_HIDE);
 
+        string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+        string cfgPath = Path.Combine(baseDir, "config.cfg");
+
         try
         {
-            var cfg = LoadConfig("config.cfg");
+            var cfg = LoadConfig(cfgPath);
 
-            // Se ATIVO não estiver ON, fecha silenciosamente
+            // Executa apenas se ATIVO=ON
             if (!cfg.ContainsKey("ATIVO") || !cfg["ATIVO"].Equals("ON", StringComparison.OrdinalIgnoreCase))
                 return;
 
-            // Atualiza
+            // Auto-update do executável
+            if (cfg.ContainsKey("REDE") && cfg.ContainsKey("EXECUTAVEL"))
+                CheckAndUpdate(cfg["REDE"], cfg["EXECUTAVEL"]);
+
+            // Atualiza a imagem apenas se for mais nova
+            if (cfg.ContainsKey("REDE") && cfg.ContainsKey("WALL") && cfg.ContainsKey("LOCAL"))
+            {
+                string sourceImg = Path.Combine(cfg["REDE"], cfg["WALL"]);
+                string destImg = cfg["LOCAL"];
+                CopyIfNewer(sourceImg, destImg);
+
+                if (File.Exists(destImg))
+                    SetWallpaper(destImg);
+            }
+        }
+        catch
+        {
+            // Ignora erros silenciosamente
+        }
+    }
+
+    static void CheckAndUpdate(string updatePath, string exeName)
+    {
+        try
+        {
+            if (!Directory.Exists(updatePath))
+                return;
+
+            string currentExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, exeName);
+            string updateFile = Path.Combine(updatePath, exeName);
+
+            if (File.Exists(updateFile) && File.Exists(currentExe))
+            {
+                Version currentVersion = AssemblyName.GetAssemblyName(currentExe).Version;
+                Version updateVersion = AssemblyName.GetAssemblyName(updateFile).Version;
+
+                if (updateVersion > currentVersion)
+                {
+                    string backup = currentExe + ".bak";
+                    File.Copy(currentExe, backup, true);
+                    File.Copy(updateFile, currentExe, true);
+                }
+            }
+        }
+        catch { }
+    }
+
+    static void CopyIfNewer(string source, string dest)
+    {
+        try
+        {
+            if (!File.Exists(source))
+                return;
+
+            bool needCopy = !File.Exists(dest) ||
+                new FileInfo(source).LastWriteTimeUtc > new FileInfo(dest).LastWriteTimeUtc ||
+                new FileInfo(source).Length != new FileInfo(dest).Length;
+
+            if (needCopy)
+                File.Copy(source, dest, true);
+        }
+        catch { }
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
+
+    private const int SPI_SETDESKWALLPAPER = 20;
+    private const int SPIF_UPDATEINIFILE = 0x01;
+    private const int SPIF_SENDCHANGE = 0x02;
+
+    static void SetWallpaper(string path)
+    {
+        try
+        {
+            SystemParametersInfo(SPI_SETDESKWALLPAPER, 0, path, SPIF_UPDATEINIFILE | SPIF_SENDCHANGE);
+        }
+        catch { }
+    }
+
+    static Dictionary<string, string> LoadConfig(string path)
+    {
+        var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        if (!File.Exists(path)) return dict;
+
+        foreach (var line in File.ReadAllLines(path))
+        {
+            if (string.IsNullOrWhiteSpace(line) || line.Trim().StartsWith("#"))
+                continue;
+
+            var parts = line.Split(new char[] { '=' }, 2);
+            if (parts.Length == 2)
+                dict[parts[0].Trim()] = parts[1].Trim();
+        }
+
+        return dict;
+    }
+}
