@@ -1,104 +1,181 @@
+/*
+ * ---------------------------------------------------------
+ * Software:   Wallpaper Manager
+ * Criador:    Elton Nike Casa
+ * Data:       27/08/2025
+ * ---------------------------------------------------------
+ */
+
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Security.Cryptography;
+using System.Text;
 
 class Program
 {
-    [DllImport("kernel32.dll")]
-    static extern IntPtr GetConsoleWindow();
-
-    [DllImport("user32.dll")]
-    static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
-
-    const int SW_HIDE = 0;
-
     [STAThread]
     static void Main()
     {
-        // Oculta o console imediatamente
-        var handle = GetConsoleWindow();
-        ShowWindow(handle, SW_HIDE);
-
         string baseDir = AppDomain.CurrentDomain.BaseDirectory;
         string cfgPath = Path.Combine(baseDir, "config.cfg");
+        string logPath = Path.Combine(baseDir, "log.txt");
 
         try
         {
+            CleanLog(logPath, 7);
+            File.AppendAllText(logPath, DateTime.Now.ToString() + " - Iniciando Wallpaper Manager\n");
+
             var cfg = LoadConfig(cfgPath);
 
-            // Executa apenas se ATIVO=ON
             if (!cfg.ContainsKey("ATIVO") || !cfg["ATIVO"].Equals("ON", StringComparison.OrdinalIgnoreCase))
-                return;
-
-            // Auto-update do executável
-            if (cfg.ContainsKey("REDE") && cfg.ContainsKey("EXECUTAVEL"))
-                CheckAndUpdate(cfg["REDE"], cfg["EXECUTAVEL"]);
-
-            // Atualiza a imagem apenas se for mais nova
-            if (cfg.ContainsKey("REDE") && cfg.ContainsKey("WALL") && cfg.ContainsKey("LOCAL"))
             {
-                string sourceImg = Path.Combine(cfg["REDE"], cfg["WALL"]);
-                string destImg = cfg["LOCAL"];
-                CopyIfNewer(sourceImg, destImg);
-
-                if (File.Exists(destImg))
-                    SetWallpaper(destImg);
+                File.AppendAllText(logPath, DateTime.Now.ToString() + " - ATIVO=OFF, encerrando\n");
+                return;
             }
-        }
-        catch
-        {
-            // Ignora erros silenciosamente
-        }
-    }
 
-    static void CheckAndUpdate(string updatePath, string exeName)
-    {
-        try
-        {
-            if (!Directory.Exists(updatePath))
-                return;
-
-            string currentExe = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, exeName);
-            string updateFile = Path.Combine(updatePath, exeName);
-
-            if (File.Exists(updateFile) && File.Exists(currentExe))
+            // ------------------- Executável -------------------
+            if (cfg.ContainsKey("REDE") && cfg.ContainsKey("EXECUTAVEL"))
             {
-                Version currentVersion = AssemblyName.GetAssemblyName(currentExe).Version;
-                Version updateVersion = AssemblyName.GetAssemblyName(updateFile).Version;
+                string exeName = cfg["EXECUTAVEL"];
+                string localExe = Path.Combine(baseDir, exeName);
+                string remoteExe = Path.Combine(cfg["REDE"], exeName);
 
-                if (updateVersion > currentVersion)
+                if (File.Exists(remoteExe))
                 {
-                    string backup = currentExe + ".bak";
-                    File.Copy(currentExe, backup, true);
-                    File.Copy(updateFile, currentExe, true);
+                    string remoteHash = ComputeHash(remoteExe);
+                    string localHash = File.Exists(localExe) ? ComputeHash(localExe) : "";
+
+                    if (localHash != remoteHash)
+                    {
+                        // Cria arquivo temporário para atualização
+                        string tempExe = Path.Combine(baseDir, exeName + "_new.exe");
+                        File.Copy(remoteExe, tempExe, true);
+
+                        // Inicia updater
+                        string updaterPath = Path.Combine(baseDir, "Updater.exe");
+                        if (File.Exists(updaterPath))
+                        {
+                            Process.Start(updaterPath, "\"" + localExe + "\" \"" + tempExe + "\"");
+                            File.AppendAllText(logPath, DateTime.Now.ToString() + " - Iniciando updater para substituir executável\n");
+                            return; // encerra o exe principal
+                        }
+                        else
+                        {
+                            File.AppendAllText(logPath, DateTime.Now.ToString() + " - Updater.exe não encontrado, não foi possível atualizar\n");
+                        }
+                    }
+                    else
+                    {
+                        File.AppendAllText(logPath, DateTime.Now.ToString() + " - Executável já atualizado.\n");
+                    }
+
+                    cfg["HASH_EXE"] = remoteHash;
+                    SaveConfig(cfgPath, cfg);
+                }
+                else
+                {
+                    File.AppendAllText(logPath, DateTime.Now.ToString() + " - Executável remoto não encontrado, teste ignorado.\n");
                 }
             }
+
+            // ------------------- Imagem -------------------
+            if (cfg.ContainsKey("REDE") && cfg.ContainsKey("WALL"))
+            {
+                string wallName = cfg["WALL"];
+                string localWall = Path.Combine(baseDir, wallName);
+                string remoteWall = Path.Combine(cfg["REDE"], wallName);
+
+                if (File.Exists(remoteWall))
+                {
+                    string remoteHash = ComputeHash(remoteWall);
+                    string localHash = File.Exists(localWall) ? ComputeHash(localWall) : "";
+
+                    if (localHash != remoteHash)
+                    {
+                        File.Copy(remoteWall, localWall, true);
+                        File.AppendAllText(logPath, DateTime.Now.ToString() + " - Imagem atualizada: " + wallName + "\n");
+                    }
+                    else
+                    {
+                        File.AppendAllText(logPath, DateTime.Now.ToString() + " - Imagem já atualizada.\n");
+                    }
+
+                    cfg["HASH_WALL"] = remoteHash;
+                    SaveConfig(cfgPath, cfg);
+
+                    if (File.Exists(localWall))
+                    {
+                        SetWallpaper(localWall);
+                        File.AppendAllText(logPath, DateTime.Now.ToString() + " - Wallpaper aplicado\n");
+                    }
+                }
+                else
+                {
+                    File.AppendAllText(logPath, DateTime.Now.ToString() + " - Imagem remota não encontrada, teste ignorado.\n");
+                }
+            }
+
+            File.AppendAllText(logPath, DateTime.Now.ToString() + " - Finalizando execução\n");
+        }
+        catch (Exception ex)
+        {
+            File.AppendAllText(logPath, DateTime.Now.ToString() + " - ERRO: " + ex.Message + "\n");
+        }
+    }
+
+    // -------- Limpa log mantendo apenas os últimos 'dias' --------
+    static void CleanLog(string path, int dias)
+    {
+        try
+        {
+            if (!File.Exists(path)) return;
+            var lines = File.ReadAllLines(path);
+            var kept = new List<string>();
+            DateTime cutoff = DateTime.Now.AddDays(-dias);
+
+            foreach (var line in lines)
+            {
+                int idx = line.IndexOf(" - ");
+                if (idx > 0)
+                {
+                    DateTime dt;
+                    if (DateTime.TryParse(line.Substring(0, idx), out dt))
+                    {
+                        if (dt >= cutoff) kept.Add(line);
+                        continue;
+                    }
+                }
+                kept.Add(line);
+            }
+
+            File.WriteAllLines(path, kept.ToArray());
         }
         catch { }
     }
 
-    static void CopyIfNewer(string source, string dest)
+    // -------- Calcula hash MD5 de um arquivo --------
+    static string ComputeHash(string path)
     {
         try
         {
-            if (!File.Exists(source))
-                return;
-
-            bool needCopy = !File.Exists(dest) ||
-                new FileInfo(source).LastWriteTimeUtc > new FileInfo(dest).LastWriteTimeUtc ||
-                new FileInfo(source).Length != new FileInfo(dest).Length;
-
-            if (needCopy)
-                File.Copy(source, dest, true);
+            using (var md5 = MD5.Create())
+            using (var stream = File.OpenRead(path))
+            {
+                var hash = md5.ComputeHash(stream);
+                var sb = new StringBuilder();
+                foreach (byte b in hash) sb.Append(b.ToString("x2"));
+                return sb.ToString();
+            }
         }
-        catch { }
+        catch { return ""; }
     }
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni);
-
     private const int SPI_SETDESKWALLPAPER = 20;
     private const int SPIF_UPDATEINIFILE = 0x01;
     private const int SPIF_SENDCHANGE = 0x02;
@@ -112,6 +189,7 @@ class Program
         catch { }
     }
 
+    // -------- Leitura do cfg --------
     static Dictionary<string, string> LoadConfig(string path)
     {
         var dict = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
@@ -119,14 +197,18 @@ class Program
 
         foreach (var line in File.ReadAllLines(path))
         {
-            if (string.IsNullOrWhiteSpace(line) || line.Trim().StartsWith("#"))
-                continue;
-
+            if (string.IsNullOrWhiteSpace(line) || line.Trim().StartsWith("#")) continue;
             var parts = line.Split(new char[] { '=' }, 2);
-            if (parts.Length == 2)
-                dict[parts[0].Trim()] = parts[1].Trim();
+            if (parts.Length == 2) dict[parts[0].Trim()] = parts[1].Trim();
         }
-
         return dict;
+    }
+
+    // -------- Salva cfg atualizado --------
+    static void SaveConfig(string path, Dictionary<string, string> cfg)
+    {
+        var lines = new List<string>();
+        foreach (var kv in cfg) lines.Add(kv.Key + "=" + kv.Value);
+        File.WriteAllLines(path, lines);
     }
 }
