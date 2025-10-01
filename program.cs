@@ -1,7 +1,7 @@
 /*
  * ---------------------------------------------------------
  * Software:   Wallpaper Manager
- * Criador:    Elton Nike Casa
+ * Criador:    Elton Nike Casa ENC
  * Data:       27/08/2025
  * ---------------------------------------------------------
  */
@@ -89,6 +89,8 @@ class Program
                 string localWall = Path.Combine(baseDir, wallName);
                 string remoteWall = Path.Combine(cfg["REDE"], wallName);
 
+                bool updated = false;
+
                 if (File.Exists(remoteWall))
                 {
                     string remoteHash = ComputeHash(remoteWall);
@@ -98,6 +100,7 @@ class Program
                     {
                         File.Copy(remoteWall, localWall, true);
                         File.AppendAllText(logPath, DateTime.Now.ToString() + " - Imagem atualizada: " + wallName + "\n");
+                        updated = true;
                     }
                     else
                     {
@@ -106,16 +109,21 @@ class Program
 
                     cfg["HASH_WALL"] = remoteHash;
                     SaveConfig(cfgPath, cfg);
-
-                    if (File.Exists(localWall))
-                    {
-                        SetWallpaper(localWall);
-                        File.AppendAllText(logPath, DateTime.Now.ToString() + " - Wallpaper aplicado\n");
-                    }
                 }
                 else
                 {
-                    File.AppendAllText(logPath, DateTime.Now.ToString() + " - Imagem remota não encontrada, teste ignorado.\n");
+                    File.AppendAllText(logPath, DateTime.Now.ToString() + " - Imagem remota não encontrada, usando cópia local.\n");
+                }
+
+                // Sempre aplica a versão local, mesmo que não tenha conseguido baixar
+                if (File.Exists(localWall))
+                {
+                    SetWallpaper(localWall);
+                    File.AppendAllText(logPath, DateTime.Now.ToString() + " - Wallpaper aplicado (local" + (updated ? " atualizado" : "") + ")\n");
+                }
+                else
+                {
+                    File.AppendAllText(logPath, DateTime.Now.ToString() + " - Nenhuma cópia local de wallpaper disponível.\n");
                 }
             }
 
